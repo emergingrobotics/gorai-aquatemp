@@ -5,6 +5,20 @@ Aqua Temp / Linked-Go pool heat pump on the gorai NATS mesh. It wraps
 [goaquatemp](https://github.com/emergingrobotics/goaquatemp), polls the Aqua Temp
 cloud, and publishes the heat pump's state as a standard `sensor/aquatemp` component.
 
+## Install
+
+```bash
+# Embed the component in a robot binary
+go get github.com/emergingrobotics/gorai-aquatemp@latest
+
+# Standalone publisher, and a subscriber that pretty-prints what it publishes
+go install github.com/emergingrobotics/gorai-aquatemp/cmd/gorai-aquatemp@latest
+go install github.com/emergingrobotics/gorai-aquatemp/cmd/aquatemp-watch@latest
+```
+
+Releases are tagged `vX.Y.Z`; see the
+[releases page](https://github.com/emergingrobotics/gorai-aquatemp/releases) for what each version pins.
+
 ## Quick start: publish to a NATS bus on this host
 
 ```bash

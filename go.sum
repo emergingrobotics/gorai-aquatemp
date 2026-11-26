@@ -1,7 +1,7 @@
 github.com/antithesishq/antithesis-sdk-go v0.7.2-default-no-op h1:p2zFsAzvhIpFya8AIOHIbWf7NGvO34QpLGclyf7nXj8=
 github.com/antithesishq/antithesis-sdk-go v0.7.2-default-no-op/go.mod h1:FQyySiasQQM8735Ddel3MRojmy4dA1IqCeyJ5jmPMbI=
-github.com/emergingrobotics/goaquatemp v0.0.0-20261126215252-c2321a3a5821 h1:G8gGxNff7ZHKKMSxInUmTPMwraIJkfntHJ1MfiHaieI=
-github.com/emergingrobotics/goaquatemp v0.0.0-20261126215252-c2321a3a5821/go.mod h1:bIEfhj5Z7A0xCnCxVMxS1rwc/3P5rHKYXLQGksM1QXk=
+github.com/emergingrobotics/goaquatemp v0.1.0 h1:jJXdNI9qcQBCxMOH4fn9ZGjjvfENJXtYl1STkb8CAHo=
+github.com/emergingrobotics/goaquatemp v0.1.0/go.mod h1:bIEfhj5Z7A0xCnCxVMxS1rwc/3P5rHKYXLQGksM1QXk=
 github.com/emergingrobotics/gorai v0.2.4 h1:xi5MO06ti5C+e9L388MAzBhKbVYQcD9t5WswS6EP6Ag=
 github.com/emergingrobotics/gorai v0.2.4/go.mod h1:ISwWpIxsaHdhEK6kOlJ9/Ejx0ZmjOOLq2DPOt5rz9YY=
 github.com/google/go-tpm v0.9.8 h1:slArAR9Ft+1ybZu0lBwpSmpwhRXaa85hWtMinMyRAWo=
