@@ -27,7 +27,7 @@ import (
 	"github.com/emergingrobotics/gorai/pkg/registry"
 	"github.com/emergingrobotics/gorai/pkg/resource"
 	"github.com/nats-io/nats.go"
-	aq "github.com/user/goaquatemp"
+	aq "github.com/emergingrobotics/goaquatemp"
 )
 
 const (

@@ -1,8 +1,8 @@
 # gorai-aquatemp
 
 Gorai satellite component: an Aqua Temp / Linked-Go heat pump as a `sensor/aquatemp`
-component, built on the goaquatemp SDK (`../../goaquatemp`, module path
-`github.com/user/goaquatemp`, pulled in by a `replace` in go.mod). Same pattern as
+component, built on the goaquatemp SDK (`github.com/emergingrobotics/goaquatemp`, a normal go.mod
+dependency; for local SDK work, gorai-all's go.work uses `./goaquatemp`). Same pattern as
 `../../gorai-gogrowatt`. See README.md for subjects, payload and commands.
 
 ## Layout

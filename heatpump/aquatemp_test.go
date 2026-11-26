@@ -11,7 +11,7 @@ import (
 	"github.com/emergingrobotics/gorai/pkg/registry"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	aq "github.com/user/goaquatemp"
+	aq "github.com/emergingrobotics/goaquatemp"
 )
 
 // fakeClient is an in-memory aq.Client.

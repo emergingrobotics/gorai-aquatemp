@@ -109,13 +109,17 @@ not exposed on NATS by the standalone binary.
 
 ## Local development
 
+The SDK (`github.com/emergingrobotics/goaquatemp`) is an ordinary go.mod dependency, so this
+repo builds standalone. To work on the SDK and this component together, use the
+[gorai-all](https://github.com/emergingrobotics/gorai-all) workspace, whose `go.work`
+pulls in the local checkouts:
+
 ```
-er/
-  goaquatemp/              # github.com/user/goaquatemp (replace in go.mod)
-  gorai-all/
-    go.work                # includes ./gorai-aquatemp
-    gorai/
-    gorai-aquatemp/        # this repo
+gorai-all/
+  go.work                  # uses ./gorai, ./goaquatemp, ./gorai-aquatemp, ...
+  gorai/
+  goaquatemp/              # github.com/emergingrobotics/goaquatemp
+  gorai-aquatemp/          # this repo
 ```
 
 ```bash

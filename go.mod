@@ -3,10 +3,10 @@ module github.com/emergingrobotics/gorai-aquatemp
 go 1.26.0
 
 require (
+	github.com/emergingrobotics/goaquatemp v0.0.0-20261126215252-c2321a3a5821
 	github.com/emergingrobotics/gorai v0.2.4
 	github.com/nats-io/nats-server/v2 v2.14.4
 	github.com/nats-io/nats.go v1.52.0
-	github.com/user/goaquatemp v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -24,7 +24,3 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-// goaquatemp's module path is still github.com/user/goaquatemp; it lives at
-// ../../goaquatemp (github.com/emergingrobotics/goaquatemp).
-replace github.com/user/goaquatemp => ../../goaquatemp
