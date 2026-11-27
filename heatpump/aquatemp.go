@@ -29,10 +29,10 @@ import (
 	"sync"
 	"time"
 
+	aq "github.com/emergingrobotics/goaquatemp"
 	"github.com/emergingrobotics/gorai/pkg/registry"
 	"github.com/emergingrobotics/gorai/pkg/resource"
 	"github.com/nats-io/nats.go"
-	aq "github.com/emergingrobotics/goaquatemp"
 )
 
 const (
@@ -511,6 +511,11 @@ func toReadings(d *aq.DeviceData, st *aq.DeviceStatus, devName string, now time.
 		"compressor_max_freq_hz": d.CompressorMaxFrequency,
 		"compressor_speed_pct":   d.CompressorSpeed,
 		"compressor_current_a":   d.CompressorCurrent,
+		// Electrical (unverified codes; see the README): V x A is a rough
+		// compressor-only power estimate, best derived at query time.
+		"inverter_input_v": d.InverterInputVoltage,
+		"real_power_raw":   d.RealPowerRaw,
+		"energy_total_kwh": d.EnergyTotal,
 	}
 	for k, v := range optF {
 		if v != nil {

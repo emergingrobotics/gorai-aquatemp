@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	aq "github.com/emergingrobotics/goaquatemp"
 	"github.com/emergingrobotics/gorai/pkg/registry"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	aq "github.com/emergingrobotics/goaquatemp"
 )
 
 // fakeClient is an in-memory aq.Client.
@@ -106,6 +106,7 @@ func newFake() *fakeClient {
 			Power: true, Mode: aq.ModeHeat, State: aq.StateHeating, FanSpeed: aq.FanAuto,
 			TargetTemp: 28, InletTemp: 26.5, OutletTemp: 27.8, AmbientTemp: 18, CoilTemp: 10,
 			CompressorRunning: ptr(true), CompressorFrequency: ptr(55.0),
+			InverterInputVoltage: ptr(230.0), EnergyTotal: ptr(471.1),
 			WaterFlowing: ptr(true), WaterTempStatus: aq.WaterTempValid, CurrentTemp: 26.5,
 		},
 		status: aq.DeviceStatus{Online: true, Status: "ONLINE"},
@@ -248,12 +249,13 @@ func TestPollPublishesReadings(t *testing.T) {
 		"device_code": "DEV1", "device_name": "Pool", "state": "heating", "mode": "heat",
 		"power": true, "target_temp_c": 28.0, "pool_temp_c": 26.5, "compressor_freq_hz": 55.0,
 		"water_temp_status": "valid", "online": true,
+		"inverter_input_v": 230.0, "energy_total_kwh": 471.1,
 	} {
 		if r[k] != want {
 			t.Errorf("%s = %v, want %v", k, r[k], want)
 		}
 	}
-	for _, k := range []string{"suction_temp_c", "compressor_speed_pct", "faults", "external_stop"} {
+	for _, k := range []string{"suction_temp_c", "compressor_speed_pct", "faults", "external_stop", "real_power_raw"} {
 		if _, ok := r[k]; ok {
 			t.Errorf("%s present but not reported by device", k)
 		}

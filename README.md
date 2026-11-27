@@ -89,6 +89,9 @@ runtime gives it a `nats` dependency; `Readings()` works either way.
 | `water_flowing`, `water_temp_status`, `water_temps_valid` | | `valid`, `no_flow`, `unknown` |
 | `ambient_temp_c`, `coil_temp_c`, `suction_temp_c`, `exhaust_temp_c` | °C | |
 | `compressor_running`, `compressor_freq_hz`, `compressor_max_freq_hz`, `compressor_speed_pct`, `compressor_current_a` | | |
+| `inverter_input_v` | V | Inverter board AC input (T14). `inverter_input_v × compressor_current_a` is a rough compressor-only power estimate (no fan, controls or power factor) |
+| `real_power_raw` | ? | Z04 "real power value" as reported. **Unit unverified**: calibrate against a meter before use |
+| `energy_total_kwh` | kWh? | Z06 accumulated electricity counter. **Probably kWh, unverified**. Use differences between readings |
 | `external_stop` | | A wired input is holding the unit off |
 | `online`, `fault`, `faults`, `sensor_faults` | | |
 

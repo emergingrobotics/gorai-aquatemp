@@ -3,7 +3,7 @@ module github.com/emergingrobotics/gorai-aquatemp
 go 1.26.0
 
 require (
-	github.com/emergingrobotics/goaquatemp v0.1.0
+	github.com/emergingrobotics/goaquatemp v0.2.0
 	github.com/emergingrobotics/gorai v0.2.4
 	github.com/nats-io/nats-server/v2 v2.14.4
 	github.com/nats-io/nats.go v1.52.0
