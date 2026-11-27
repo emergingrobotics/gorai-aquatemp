@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -23,12 +24,18 @@ type fakeClient struct {
 	err      error
 	controls []aq.ControlCommand
 	loggedIn bool
+	loginErr error // returned by Login when set
+	logins   int   // Login calls
 }
 
 func (f *fakeClient) Login(context.Context) error {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.logins++
+	if f.loginErr != nil {
+		return f.loginErr
+	}
 	f.loggedIn = true
-	f.mu.Unlock()
 	return nil
 }
 func (f *fakeClient) Logout(context.Context) error {
@@ -177,7 +184,9 @@ func newTest(t *testing.T, fc *fakeClient, nc *nats.Conn) *HeatPump {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newHeatPump(baseConf(), cfg, fc, devName, nc, time.Now)
+	h := newHeatPump(baseConf(), cfg, fc, devName, nc, time.Now)
+	h.connected = true
+	return h
 }
 
 func TestParseConfig(t *testing.T) {
@@ -364,6 +373,115 @@ func TestNewViaRegistryAndClose(t *testing.T) {
 	}
 	if fc.IsAuthenticated() {
 		t.Fatal("Close should log out")
+	}
+}
+
+func fastBackoff(t *testing.T) {
+	t.Helper()
+	oldMin, oldMax := connectBackoffMin, connectBackoffMax
+	connectBackoffMin, connectBackoffMax = 10*time.Millisecond, 40*time.Millisecond
+	t.Cleanup(func() { connectBackoffMin, connectBackoffMax = oldMin, oldMax })
+}
+
+func useFake(t *testing.T, fc *fakeClient) {
+	t.Helper()
+	old := clientFactory
+	clientFactory = func(*Config) (aq.Client, error) { return fc, nil }
+	t.Cleanup(func() { clientFactory = old })
+}
+
+// The cloud being unreachable at startup must not fail New: the component
+// reports source_down/connect_failed, retries, and starts publishing once the
+// cloud answers.
+func TestNewSucceedsWhileCloudIsDownAndConnectsLater(t *testing.T) {
+	fastBackoff(t)
+	nc := startNATS(t)
+	data := subscribe(t, nc, "gorai.home.heat-pump.data")
+	events := subscribe(t, nc, "gorai.home.heat-pump.event")
+	fc := newFake()
+	fc.loginErr = errors.New("dial tcp: connection refused")
+	useFake(t, fc)
+
+	comp, err := New(context.Background(), deps{nc}, baseConf())
+	if err != nil {
+		t.Fatalf("New failed while the cloud was down: %v", err)
+	}
+	h := comp.(*HeatPump)
+	defer h.Close(context.Background())
+
+	ev := recv(t, events)
+	if ev["kind"] != EventSourceDown || ev["reason"] != ReasonConnectFailed {
+		t.Fatalf("event = %v, want source_down/connect_failed", ev)
+	}
+	if _, ok := ev["error"]; ok {
+		t.Error("event carries the raw error")
+	}
+	if _, err := h.Readings(context.Background()); err == nil {
+		t.Error("Readings succeeded before connecting")
+	}
+	if _, err := h.DoCommand(context.Background(), map[string]any{"command": "refresh"}); err == nil {
+		t.Error("DoCommand succeeded before connecting")
+	}
+	if _, err := h.DoCommand(context.Background(), map[string]any{"command": "get_config"}); err != nil {
+		t.Errorf("get_config before connecting: %v", err)
+	}
+
+	fc.set(func(f *fakeClient) { f.loginErr = nil })
+	if d := recv(t, data); d["device_code"] != "DEV1" {
+		t.Errorf("data after connecting = %v", d)
+	}
+	if ev := recv(t, events); ev["kind"] != EventSourceUp {
+		t.Errorf("event = %v, want source_up", ev)
+	}
+	if _, err := h.Readings(context.Background()); err != nil {
+		t.Errorf("Readings after connecting: %v", err)
+	}
+}
+
+// A rejected login is reported once and never retried.
+func TestRejectedLoginIsNotRetried(t *testing.T) {
+	fastBackoff(t)
+	nc := startNATS(t)
+	events := subscribe(t, nc, "gorai.home.heat-pump.event")
+	fc := newFake()
+	fc.loginErr = fmt.Errorf("login failed: %w", aq.ErrInvalidCredentials)
+	useFake(t, fc)
+
+	comp, err := New(context.Background(), deps{nc}, baseConf())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer comp.(*HeatPump).Close(context.Background())
+
+	if ev := recv(t, events); ev["reason"] != ReasonAuthFailed {
+		t.Fatalf("event = %v, want source_down/auth_failed", ev)
+	}
+	time.Sleep(150 * time.Millisecond) // several backoff periods
+	fc.mu.Lock()
+	logins := fc.logins
+	fc.mu.Unlock()
+	if logins != 1 {
+		t.Errorf("Login called %d times, want 1", logins)
+	}
+	noMsg(t, events)
+}
+
+func TestNewConnectedFailsFast(t *testing.T) {
+	nc := startNATS(t)
+	fc := newFake()
+	fc.loginErr = errors.New("connection refused")
+	useFake(t, fc)
+	if _, err := NewConnected(context.Background(), deps{nc}, baseConf()); err == nil {
+		t.Fatal("NewConnected succeeded with the cloud down")
+	}
+	fc.set(func(f *fakeClient) { f.loginErr = nil })
+	h, err := NewConnected(context.Background(), deps{nc}, baseConf())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close(context.Background())
+	if _, err := h.DoCommand(context.Background(), map[string]any{"command": "get_state"}); err != nil {
+		t.Errorf("get_state after NewConnected: %v", err)
 	}
 }
 

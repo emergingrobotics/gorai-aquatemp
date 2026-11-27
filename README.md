@@ -98,6 +98,8 @@ returns the same map plus `data_age_s`.
 ### `gorai.<robot_id>.<name>.event`: state changes
 
 ```json
+{"ts":"...","kind":"source_down","reason":"connect_failed"}
+{"ts":"...","kind":"source_down","reason":"auth_failed"}
 {"ts":"...","kind":"source_down","reason":"api_error","device":"289C..."}
 {"ts":"...","kind":"source_down","reason":"device_offline","device":"289C..."}
 {"ts":"...","kind":"source_up","device":"289C..."}
@@ -105,6 +107,18 @@ returns the same map plus `data_age_s`.
 ```
 
 `api_error` fires after 3 consecutive failed polls.
+
+Login and device lookup run in the background, so an unreachable Aqua Temp cloud at
+startup never stops the robot that embeds the component:
+
+- `connect_failed`: login or device lookup failed (network, cloud outage). The component
+  retries with backoff (30s, doubling to 10m) and publishes `source_up` once it is polling.
+  Until then `Readings()` and DoCommand (except `get_config`) return an error.
+- `auth_failed`: Aqua Temp rejected the username/password. This is not retried, so a wrong
+  password cannot lock the account; fix the config and reconfigure or restart.
+
+Event payloads never include the raw error; it is logged. The standalone `gorai-aquatemp`
+binary still exits at startup if it cannot connect (it uses `heatpump.NewConnected`).
 
 ## DoCommand
 

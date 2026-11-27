@@ -79,12 +79,11 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	comp, err := heatpump.New(ctx, natsDeps{nc}, conf)
+	hp, err := heatpump.NewConnected(ctx, natsDeps{nc}, conf)
 	if err != nil {
 		logger.Error("create component", "error", err)
 		os.Exit(1)
 	}
-	hp := comp.(*heatpump.HeatPump)
 
 	var reg *mesh.Registration
 	if !*noMesh {

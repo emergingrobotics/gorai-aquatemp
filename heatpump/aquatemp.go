@@ -7,8 +7,13 @@
 //
 //   - every successful poll as JSON on gorai.<robot_id>.<name>.data
 //   - state changes on gorai.<robot_id>.<name>.event:
-//     source_down / source_up (API failures, device offline) and
-//     state_change (heating, idle, defrosting, ...).
+//     source_down / source_up (cannot connect, login rejected, API failures,
+//     device offline) and state_change (heating, idle, defrosting, ...).
+//
+// Login and device lookup happen in the background, so an unreachable cloud at
+// startup never stops the robot: the component retries with backoff and starts
+// publishing once it connects. A rejected login is not retried (see
+// ReasonAuthFailed).
 //
 // Fields the cloud did not report are left out of the payload, never sent as 0.
 // Water temperatures read stagnant pipe water when there is no flow; pool_temp_c
@@ -47,6 +52,19 @@ const (
 
 	ReasonAPIError      = "api_error"
 	ReasonDeviceOffline = "device_offline"
+	// ReasonConnectFailed: login or device lookup failed for a reason that may
+	// pass (network, cloud outage). The component keeps retrying with backoff.
+	ReasonConnectFailed = "connect_failed"
+	// ReasonAuthFailed: Aqua Temp rejected the username/password. Retrying
+	// cannot help and could lock the account, so the component stays idle until
+	// it is reconfigured or the robot restarts.
+	ReasonAuthFailed = "auth_failed"
+)
+
+// Connection retry backoff. Variables so tests can shorten them.
+var (
+	connectBackoffMin = 30 * time.Second
+	connectBackoffMax = 10 * time.Minute
 )
 
 func init() {
@@ -69,10 +87,11 @@ type HeatPump struct {
 	logger *slog.Logger
 	now    func() time.Time
 
-	mu         sync.RWMutex // guards config, client, deviceName, readings, lastPollAt, pollErr
+	mu         sync.RWMutex // guards config, client, deviceName, connected, readings, lastPollAt, pollErr
 	config     *Config
 	client     aq.Client
 	deviceName string
+	connected  bool // login and device lookup succeeded
 	readings   map[string]any
 	lastPollAt time.Time
 	pollErr    error
@@ -105,7 +124,9 @@ var clientFactory = func(cfg *Config) (aq.Client, error) {
 	return aq.NewClient(opts...)
 }
 
-// New creates the component, logs in, resolves the device and starts polling.
+// New validates the config, creates the component and starts connecting in the
+// background. It fails only for invalid configuration, never because the
+// Aqua Temp cloud is unreachable.
 func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) (any, error) {
 	cfg, err := parseConfig(conf)
 	if err != nil {
@@ -116,10 +137,6 @@ func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) 
 	if err != nil {
 		return nil, fmt.Errorf("creating aquatemp client: %w", err)
 	}
-	devName, err := resolveDevice(ctx, client, cfg)
-	if err != nil {
-		return nil, err
-	}
 
 	var nc *nats.Conn
 	if deps != nil {
@@ -128,12 +145,41 @@ func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) 
 		}
 	}
 
-	h := newHeatPump(conf, cfg, client, devName, nc, time.Now)
+	h := newHeatPump(conf, cfg, client, "", nc, time.Now)
 	if nc != nil {
 		h.logger.Info("NATS publishing enabled", "topic", h.topic, "event_topic", h.eventTopic)
 	} else {
 		h.logger.Warn("NATS connection not available, data will not be published")
 	}
+	h.startConnecting(ctx)
+	return h, nil
+}
+
+// NewConnected is New for programs that want to fail fast, such as the
+// standalone gorai-aquatemp binary: it logs in and resolves the device before
+// returning, and returns that error instead of retrying. Robots should use New
+// (via the registry), which never fails because the cloud is unreachable.
+func NewConnected(ctx context.Context, deps registry.Dependencies, conf registry.Config) (*HeatPump, error) {
+	cfg, err := parseConfig(conf)
+	if err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	client, err := clientFactory(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating aquatemp client: %w", err)
+	}
+	devName, err := resolveDevice(ctx, client, cfg)
+	if err != nil {
+		return nil, err
+	}
+	var nc *nats.Conn
+	if deps != nil {
+		if v, err := deps.Get("nats"); err == nil {
+			nc, _ = v.(*nats.Conn)
+		}
+	}
+	h := newHeatPump(conf, cfg, client, devName, nc, time.Now)
+	h.connected = true
 	h.startPolling(ctx)
 	return h, nil
 }
@@ -228,29 +274,118 @@ func resolveDevice(ctx context.Context, client aq.Client, cfg *Config) (string, 
 	}
 }
 
+// startConnecting logs in and resolves the device in the background, then
+// polls. Transient failures are retried with backoff (source_down /
+// connect_failed); a rejected login stops the component (source_down /
+// auth_failed).
+func (h *HeatPump) startConnecting(parent context.Context) {
+	ctx, cancel := context.WithCancel(parent)
+	h.cancel = cancel
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
+		if h.connect(ctx) {
+			h.pollLoop(ctx)
+		}
+	}()
+}
+
+// connect retries login and device lookup until it succeeds, the login is
+// rejected, or ctx ends. It reports whether the component is connected.
+func (h *HeatPump) connect(ctx context.Context) bool {
+	backoff := connectBackoffMin
+	for {
+		h.mu.RLock()
+		cfg, client := *h.config, h.client
+		h.mu.RUnlock()
+
+		devName, err := resolveDevice(ctx, client, &cfg)
+		if err == nil {
+			h.mu.Lock()
+			h.config, h.deviceName, h.connected, h.pollErr = &cfg, devName, true, nil
+			h.mu.Unlock()
+			h.logger.Info("connected to Aqua Temp", "device", cfg.DeviceCode)
+			return true
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		h.mu.Lock()
+		h.pollErr = err
+		h.mu.Unlock()
+
+		if errors.Is(err, aq.ErrInvalidCredentials) {
+			h.logger.Error("Aqua Temp rejected the login; not retrying until reconfigured or restarted", "error", err)
+			h.markDown(cfg.DeviceCode, ReasonAuthFailed)
+			return false
+		}
+		h.logger.Warn("cannot connect to Aqua Temp yet, retrying", "error", err, "in", backoff.String())
+		h.markDown(cfg.DeviceCode, ReasonConnectFailed)
+		if !sleepCtx(ctx, backoff) {
+			return false
+		}
+		backoff = min(backoff*2, connectBackoffMax)
+	}
+}
+
+// markDown publishes source_down with reason once, when the reason changes.
+// The error itself goes to the log only: it can echo account details.
+func (h *HeatPump) markDown(device, reason string) {
+	h.pollMu.Lock()
+	defer h.pollMu.Unlock()
+	if h.downReason == reason {
+		return
+	}
+	h.downReason = reason
+	ev := map[string]any{
+		"ts":     h.now().UTC().Format(time.RFC3339),
+		"kind":   EventSourceDown,
+		"reason": reason,
+	}
+	if device != "" {
+		ev["device"] = device
+	}
+	h.publish(h.eventTopic, ev)
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// startPolling polls in the background; the device must already be resolved.
 func (h *HeatPump) startPolling(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	h.cancel = cancel
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
+		h.pollLoop(ctx)
+	}()
+}
 
+func (h *HeatPump) pollLoop(ctx context.Context) {
 	h.mu.RLock()
 	interval := h.config.PollInterval
 	h.mu.RUnlock()
 
-	h.wg.Add(1)
-	go func() {
-		defer h.wg.Done()
-		h.poll(ctx)
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				h.poll(ctx)
-			}
+	h.poll(ctx)
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			h.poll(ctx)
 		}
-	}()
+	}
 }
 
 // poll fetches a snapshot, publishes it and updates source state.
@@ -429,7 +564,7 @@ func (h *HeatPump) Readings(ctx context.Context) (map[string]any, error) {
 	defer h.mu.RUnlock()
 	if h.readings == nil {
 		if h.pollErr != nil {
-			return nil, fmt.Errorf("no readings available, last poll error: %w", h.pollErr)
+			return nil, fmt.Errorf("no readings available, last error: %w", h.pollErr)
 		}
 		return nil, errors.New("no readings available yet")
 	}
@@ -468,7 +603,7 @@ func (h *HeatPump) Reconfigure(ctx context.Context, deps resource.Dependencies, 
 		h.downReason = ""
 		h.lastState = ""
 	}
-	h.config, h.client, h.deviceName = cfg, client, devName
+	h.config, h.client, h.deviceName, h.connected = cfg, client, devName, true
 	h.pollErr = nil
 	h.errCount = 0
 	h.mu.Unlock()
@@ -491,10 +626,13 @@ func (h *HeatPump) Reconfigure(ctx context.Context, deps resource.Dependencies, 
 // Set commands are validated by goaquatemp and followed by a refresh.
 func (h *HeatPump) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	h.mu.RLock()
-	cfg, client := h.config, h.client
+	cfg, client, connected, lastErr := h.config, h.client, h.connected, h.pollErr
 	h.mu.RUnlock()
 
 	name, _ := cmd["command"].(string)
+	if !connected && name != "get_config" {
+		return nil, fmt.Errorf("not connected to Aqua Temp yet (last error: %v)", lastErr)
+	}
 	var err error
 	switch name {
 	case "refresh":
